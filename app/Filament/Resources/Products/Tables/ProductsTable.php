@@ -22,6 +22,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TrashedFilter;
+use App\Filament\Resources\Products\Actions\ReceiveStockAction;
 
 class ProductsTable
 {
@@ -150,6 +151,7 @@ class ProductsTable
                     }),
 
                 ViewAction::make(),
+                ReceiveStockAction::make(),
                 EditAction::make(),
                 RestoreAction::make(),
             ])

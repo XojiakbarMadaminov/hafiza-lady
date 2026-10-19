@@ -112,6 +112,26 @@ it('creates and updates products by id and replaces the selected stock quantity'
         ->and(ProductStock::query()->count())->toBe(2);
 });
 
+it('stores numeric excel product names as strings on creation and update', function (int|float|string $name, string $expectedName) {
+    $product = Product::factory()->create(['store_id' => $this->store->id]);
+    $path    = ($this->makeExcel)([
+        [$product->id, $name, 60, 100, 10],
+        [1000, $name, 60, 100, 10],
+    ]);
+
+    expect($this->service->import($path, $this->user, $this->stock->id))
+        ->toBe(['created' => 1, 'updated' => 1, 'skipped' => 0])
+        ->and($product->refresh()->name)->toBe($expectedName)
+        ->and(Product::findOrFail(1000)->name)->toBe($expectedName);
+})->with([
+    'integer'                           => [1, '1'],
+    'zero'                              => [0, '0'],
+    'negative integer'                  => [-12, '-12'],
+    'decimal'                           => [12.5, '12.5'],
+    'numeric string with leading zeros' => ['00123', '00123'],
+    'trimmed string'                    => ['  Product  ', 'Product'],
+]);
+
 it('generates unique valid ean thirteen barcodes only when missing and preserves them on reimport', function (?string $missingBarcode) {
     $withoutBarcode = Product::factory()->create(['store_id' => $this->store->id, 'barcode' => $missingBarcode]);
     $withBarcode    = Product::factory()->create(['store_id' => $this->store->id, 'barcode' => '1234567890128']);

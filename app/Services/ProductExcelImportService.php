@@ -80,7 +80,7 @@ class ProductExcelImportService
 
                         $data = [
                             'id'            => $values[0] ?? null,
-                            'name'          => is_string($values[1]) ? trim($values[1]) : $values[1],
+                            'name'          => is_scalar($values[1]) ? trim((string) $values[1]) : $values[1],
                             'initial_price' => $values[2],
                             'price'         => $values[3],
                             'quantity'      => blank($values[4] ?? null) ? 0 : $values[4],
