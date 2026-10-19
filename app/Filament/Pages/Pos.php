@@ -72,6 +72,8 @@ class Pos extends Page
     /** @var EloquentCollection<int, Product> */
     public EloquentCollection $products;
 
+    public ?int $expandedVariantProductId = null;
+
     public array $cart                             = [];
     public array $totals                           = ['qty' => 0, 'amount' => 0];
     public array $activeCarts                      = []; // Barcha faol cartlar ro'yxati
@@ -284,7 +286,8 @@ class Pos extends Page
     /* ---------- Qidiruv ---------- */
     public function updatedSearch(): void
     {
-        $this->searchById = '';
+        $this->expandedVariantProductId = null;
+        $this->searchById               = '';
 
         if (empty(trim($this->search))) {
             $this->products = new EloquentCollection;
@@ -294,8 +297,8 @@ class Pos extends Page
 
         $this->products = Product::query()
             ->where(
-                fn ($q) => $q->where('barcode', 'ILIKE', "%{$this->search}%")
-                    ->orWhere('name', 'ILIKE', "%{$this->search}%")
+                fn ($q) => $q->whereLike('barcode', "%{$this->search}%")
+                    ->orWhereLike('name', "%{$this->search}%")
             )
             ->orderBy('name')
             ->limit(5)
@@ -304,7 +307,8 @@ class Pos extends Page
 
     public function updatedSearchById(): void
     {
-        $this->search = '';
+        $this->expandedVariantProductId = null;
+        $this->search                   = '';
 
         $term = trim($this->searchById);
 
@@ -323,9 +327,151 @@ class Pos extends Page
     /* ---------- Savat operatsiyalari ---------- */
     public function add(int $id): void
     {
-        app(CartService::class)->add(Product::findOrFail($id), 1, $this->activeCartId);
+        $product = Product::findOrFail($id);
+
+        if (!$product->isPackageBased()) {
+            $this->expandedVariantProductId = null;
+            $this->products                 = collect([$product]);
+
+            return;
+        }
+
+        app(CartService::class)->add($product, 1, $this->activeCartId);
         $this->refreshCart();
         $this->refreshActiveCarts();
+    }
+
+    #[Computed]
+    public function posProducts(): EloquentCollection
+    {
+        return Product::query()
+            ->with(['sizes.productStocks', 'productStocks'])
+            ->whereKey(array_unique(array_merge(array_keys($this->cart), $this->products->pluck('id')->all())))
+            ->get()
+            ->keyBy('id');
+    }
+
+    #[Computed]
+    public function cartLines(): array
+    {
+        $lines = [];
+
+        foreach ($this->cart as $row) {
+            $product = $this->posProducts->get($row['id']);
+
+            if (!$product) {
+                continue;
+            }
+
+            if ($product->isPackageBased()) {
+                $lines[] = array_merge($row, [
+                    'variant_id'   => null,
+                    'variant_name' => null,
+                    'available'    => (int) ($product->productStocks->firstWhere('stock_id', $row['stock_id'])?->quantity ?? 0),
+                ]);
+
+                continue;
+            }
+
+            foreach ($product->sizes as $variant) {
+                $quantity = (int) ($row['sizes'][$variant->id] ?? 0);
+
+                if ($quantity > 0) {
+                    $lines[] = array_merge($row, [
+                        'variant_id'   => $variant->id,
+                        'variant_name' => $variant->size,
+                        'qty'          => $quantity,
+                        'available'    => (int) ($variant->productStocks->firstWhere('stock_id', $row['stock_id'])?->quantity ?? 0),
+                    ]);
+                }
+            }
+        }
+
+        return $lines;
+    }
+
+    public function toggleVariantPicker(int $productId): void
+    {
+        abort_unless(static::canAccess(), 403);
+
+        $product = Product::query()->findOrFail($productId);
+        abort_if($product->isPackageBased(), 422);
+
+        $this->expandedVariantProductId = $this->expandedVariantProductId === $productId ? null : $productId;
+    }
+
+    public function getVariantOptions(int $productId): array
+    {
+        $product = $this->posProducts->get($productId);
+        $stockId = $this->variantStockId($productId);
+
+        return $product?->sizes->map(fn ($variant): array => [
+            'id'        => $variant->id,
+            'name'      => $variant->size,
+            'available' => (int) ($variant->productStocks->firstWhere('stock_id', $stockId)?->quantity ?? 0),
+            'selected'  => (int) ($this->cart[$productId]['sizes'][$variant->id] ?? 0) > 0,
+        ])->all() ?? [];
+    }
+
+    private function variantStockId(int $productId): ?int
+    {
+        $stockId = $this->cart[$productId]['stock_id'] ?? null;
+
+        return Stock::query()->active()
+            ->when($stockId, fn ($query) => $query->whereKey($stockId))
+            ->orderByDesc('is_main')
+            ->orderBy('id')
+            ->value('id');
+    }
+
+    public function addVariant(int $productId, int $variantId): void
+    {
+        $quantity = (int) (app(CartService::class)->all($this->activeCartId)[$productId]['sizes'][$variantId] ?? 0);
+        $this->updateVariantQty($productId, $variantId, $quantity + 1);
+    }
+
+    public function updateVariantQty(int $productId, int $variantId, int $quantity): bool
+    {
+        abort_unless(static::canAccess(), 403);
+
+        $product = Product::query()->findOrFail($productId);
+        abort_if($product->isPackageBased(), 422);
+        $variant     = $product->sizes()->findOrFail($variantId);
+        $cartService = app(CartService::class);
+        $cart        = $cartService->all($this->activeCartId);
+        $stockId     = $this->variantStockId($productId);
+        $available   = (int) ($variant->productStocks()->where('stock_id', $stockId)->value('quantity') ?? 0);
+
+        if ($quantity < 0 || ($quantity > 0 && (!$stockId || $quantity > $available))) {
+            Notification::make()->title('Yetarli miqdor yo‘q')->body("Omborda {$available} dona mavjud.")->danger()->send();
+
+            return false;
+        }
+
+        $quantities = $cart[$productId]['sizes'] ?? [];
+
+        if ($quantity === 0) {
+            unset($quantities[$variantId]);
+        } else {
+            $quantities[$variantId] = $quantity;
+        }
+
+        if (empty($quantities)) {
+            $cartService->remove($productId, $this->activeCartId);
+        } else {
+            if (!isset($cart[$productId])) {
+                $cartService->add($product, 1, $this->activeCartId);
+                $cartService->updateStock($productId, $stockId, $this->activeCartId);
+            }
+
+            $cartService->updateSizes($productId, $quantities, $this->activeCartId);
+        }
+
+        unset($this->posProducts, $this->cartLines);
+        $this->refreshCart();
+        $this->refreshActiveCarts();
+
+        return true;
     }
 
     public function updateQty(int $id, int $qty)
@@ -349,7 +495,7 @@ class Pos extends Page
         if (($product?->type ?? 'size') !== 'package') {
             Notification::make()
                 ->title('Variantni tanlang')
-                ->body('Variantli tovar uchun miqdor variant modalida belgilanadi.')
+                ->body('Variantli tovar uchun miqdorni variant qatorida belgilang.')
                 ->warning()
                 ->send();
 
@@ -405,7 +551,7 @@ class Pos extends Page
         if (($product?->type ?? 'size') !== 'package') {
             Notification::make()
                 ->title('Variantni tanlang')
-                ->body('Variantli tovar uchun miqdor variant modalida belgilanadi.')
+                ->body('Variantli tovar uchun miqdorni variant qatorida belgilang.')
                 ->warning()
                 ->send();
 
@@ -1046,6 +1192,8 @@ class Pos extends Page
         On('refresh-cart')]
     public function refreshCart(): void
     {
+        unset($this->posProducts, $this->cartLines);
+
         $cartService  = app(CartService::class);
         $this->cart   = $cartService->all($this->activeCartId);
         $this->totals = $this->applyCustomerDiscountToTotals(
@@ -1346,12 +1494,18 @@ class Pos extends Page
 
         $product = Product::where('barcode', $value)
             ->orWhere(function ($q) use ($value) {
-                $q->where('name', 'ILIKE', "{$value}%")
-                    ->orWhere('name', 'ILIKE', "%{$value}");
+                $q->whereLike('name', "{$value}%")
+                    ->orWhereLike('name', "%{$value}");
             })
             ->first();
 
         if ($product) {
+            if (!$product->isPackageBased()) {
+                $this->add($product->id);
+
+                return;
+            }
+
             app(CartService::class)->add($product, 1, $this->activeCartId);
             $this->reset('search');
             $this->products = new EloquentCollection;
@@ -1383,6 +1537,12 @@ class Pos extends Page
             ->first();
 
         if ($product) {
+            if (!$product->isPackageBased()) {
+                $this->add($product->id);
+
+                return;
+            }
+
             app(CartService::class)->add($product, 1, $this->activeCartId);
             $this->reset('searchById');
             $this->products = new EloquentCollection;

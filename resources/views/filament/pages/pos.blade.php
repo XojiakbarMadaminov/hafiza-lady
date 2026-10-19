@@ -535,12 +535,51 @@
                             </td>
                             <td class="px-2 py-1">{{ $p->name }}</td>
                             <td class="px-2 py-1 text-right">{{ number_format($p->price, 2, '.', ' ') }}</td>
-                            <td class="px-2 py-1">
-                                <x-filament::button wire:click="add({{ $p->id }})" size="sm">
-                                    Qo'shish
-                                </x-filament::button>
+                            <td class="px-2 py-1 text-right">
+                                @if($p->isPackageBased())
+                                    <x-filament::button wire:click="add({{ $p->id }})" size="sm">
+                                        Qo'shish
+                                    </x-filament::button>
+                                @else
+                                    <x-filament::button
+                                        wire:click="toggleVariantPicker({{ $p->id }})"
+                                        data-testid="variant-toggle-{{ $p->id }}"
+                                        aria-label="{{ $p->variant_label }}ni tanlash"
+                                        aria-expanded="{{ $expandedVariantProductId === $p->id ? 'true' : 'false' }}"
+                                        aria-controls="variant-picker-{{ $p->id }}"
+                                        size="sm"
+                                    >
+                                        ...
+                                    </x-filament::button>
+                                @endif
                             </td>
                         </tr>
+                        @if(!$p->isPackageBased() && $expandedVariantProductId === $p->id)
+                            <tr wire:key="variant-picker-{{ $activeCartId }}-{{ $p->id }}">
+                                <td colspan="4" class="px-2 py-3">
+                                    <div id="variant-picker-{{ $p->id }}" data-testid="variant-picker-{{ $p->id }}" class="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
+                                        <span class="text-sm font-medium">{{ $p->variant_label }}ni tanlang:</span>
+                                        @forelse($this->getVariantOptions($p->id) as $variant)
+                                            <x-filament::button
+                                                wire:key="variant-option-{{ $activeCartId }}-{{ $p->id }}-{{ $variant['id'] }}"
+                                                wire:click="addVariant({{ $p->id }}, {{ $variant['id'] }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="addVariant,updateVariantQty"
+                                                :color="$variant['selected'] ? 'primary' : 'gray'"
+                                                :disabled="$variant['available'] <= ($cart[$p->id]['sizes'][$variant['id']] ?? 0)"
+                                                size="sm"
+                                                title="Omborda: {{ $variant['available'] }} dona"
+                                            >
+                                                {{ $variant['name'] }}
+                                            </x-filament::button>
+                                        @empty
+                                            <span class="text-sm text-gray-500 dark:text-gray-400">Variantlar mavjud emas.</span>
+                                        @endforelse
+                                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ $p->variant_label }} bosilishi bilan savatga qo'shiladi.</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        @endif
                     @endforeach
                     </tbody>
                 </table>
@@ -564,183 +603,102 @@
                     <p class="text-xs mt-1">Qidiruv maydonidan mahsulot qo'shing.</p>
                 </div>
             @else
+                @php
+                    $cartLines = $this->cartLines;
+                    $hasVariants = collect($cartLines)->contains(fn ($line) => $line['variant_id'] !== null);
+                @endphp
                 <div class="flow-root overflow-x-auto">
-                    <table class="min-w-[980px] w-full text-sm divide-y divide-gray-200 dark:divide-gray-700">
+                    <table class="min-w-[720px] w-full text-sm divide-y divide-gray-200 dark:divide-gray-700">
                         <thead class="bg-gray-50 dark:bg-gray-800">
-                        <tr>
-                            <th scope="col"
-                                class="w-full px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Nomi
-                            </th>
-                            <th scope="col"
-                                class="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Sklad
-                            </th>
-                            <th scope="col"
-                                class="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Variantlar va miqdori
-                            </th>
-                            <th scope="col"
-                                class="px-3 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Kelgan narxi
-                            </th>
-                            <th scope="col"
-                                class="px-3 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Sotish narxi
-                            </th>
-                            <th scope="col"
-                                class="px-3 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Jami
-                            </th>
-                            <th scope="col"
-                                class="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Amal
-                            </th>
+                        <tr class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                            <th scope="col" class="px-3 py-3 text-left font-medium">Nomi</th>
+                            @if($hasVariants)
+                                <th scope="col" class="px-3 py-3 text-center font-medium">Razmer / Rang</th>
+                            @endif
+                            <th scope="col" class="px-3 py-3 text-center font-medium">Miqdor</th>
+                            <th scope="col" class="px-3 py-3 text-right font-medium">Sotish narxi</th>
+                            <th scope="col" class="px-3 py-3 text-right font-medium">Jami</th>
+                            <th scope="col" class="px-3 py-3 text-center font-medium">Amal</th>
                         </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                        @foreach($cart as $index => $row)
-                            <tr>
-                                <td class="w-full px-3 py-3 font-medium text-gray-900 dark:text-gray-100 whitespace-normal break-words">
-                                    {{ $row['name'] }}
-                                </td>
-
-                                {{-- ✅ Har bir mahsulot uchun sklad select --}}
-                                <td class="px-3 py-3 text-center">
-                                    <select
-                                        class="min-w-[220px] w-auto px-3 py-1.5
-                                           border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white
-                                           focus:ring-primary-500 focus:border-primary-500 rounded-md shadow-sm text-sm"
-                                        x-on:change="$wire.updateStock({{ $row['id'] }}, $event.target.value);"
-                                    >
-                                        @foreach(App\Models\Stock::scopes(['active'])->get() as $stock)
-                                            <option value="{{ $stock->id }}"
-                                                @selected(($row['stock_id'] ?? null) == $stock->id)>
-                                                {{ $stock->name }}
-                                            </option>
-                                        @endforeach
-                                    </select>
-                                </td>
-
-                                {{-- Razmerlar va miqdor --}}
-                                <td class="px-3 py-3 text-center">
-                                    @if($this->isPackageProduct((int) $row['id']))
-                                        @php
-                                            $currentStockId = (int) ($row['stock_id'] ?? 0);
-                                            $availablePkg = $this->getPackageAvailable((int) $row['id'], $currentStockId);
-                                            $currentQty = (int) ($row['qty'] ?? 0);
-                                        @endphp
-                                        <div
-                                            wire:key="qty-input-{{ $activeCartId }}-{{ $row['id'] }}-{{ $currentQty }}"
-                                            x-data="{ qty: {{ $currentQty }} }"
-                                            x-init="$watch('$wire.cart.{{ $row['id'] }}.qty', value => qty = value || 0)"
-                                        >
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                max="{{ (int) $availablePkg }}"
-                                                x-model.number="qty"
-                                                class="w-24 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-primary-500 focus:border-primary-500 rounded-md shadow-sm text-right py-1.5 px-2 text-sm"
-                                                x-on:change="
-                                                    let v   = parseInt(qty || 0, 10);
-                                                    const max = parseInt($event.target.max || 0, 10);
-                                                    if (isNaN(v) || v < 0) v = 0;
-                                                    if (!isNaN(max) && v > max) v = max;
-                                                    qty = v;
-                                                    $wire.updatePackageQty({{ (int) $row['id'] }}, v);
-                                                "
-                                            />
-                                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                                Mavjud: {{ (int) $availablePkg }} dona
-                                            </div>
-                                        </div>
+                        <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
+                        @foreach($cartLines as $row)
+                            @php
+                                $quantityMethod = $row['variant_id'] === null ? 'updatePackageQty' : 'updateVariantQty';
+                                $quantityArguments = $row['variant_id'] === null ? (string) $row['id'] : $row['id'] . ', ' . $row['variant_id'];
+                                $lineKey = $activeCartId . '-' . $row['id'] . '-' . ($row['variant_id'] ?? 'package');
+                            @endphp
+                            <tr wire:key="cart-line-{{ $lineKey }}" data-testid="cart-line-{{ $row['id'] }}-{{ $row['variant_id'] ?? 'package' }}" class="text-gray-900 dark:text-gray-100">
+                                <td class="w-full min-w-48 px-3 py-3">
+                                    <div class="font-medium">{{ $row['name'] }}</div>
+                                    @if(count($stockOptions) > 1)
+                                        <select aria-label="{{ $row['name'] }} ombori" wire:change="updateStock({{ $row['id'] }}, $event.target.value)" class="mt-2 max-w-48 rounded-md border-gray-300 bg-white py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+                                            @foreach($stockOptions as $stockId => $stockName)
+                                                <option value="{{ $stockId }}" @selected($row['stock_id'] == $stockId)>{{ $stockName }}</option>
+                                            @endforeach
+                                        </select>
                                     @endif
-                                    @unless($this->isPackageProduct((int) $row['id']))
-                                    <x-filament::button
-                                        tag="button"
-                                        size="xs"
-                                        :color="isset($row['sizes']) && count(array_filter($row['sizes'])) > 0 ? 'success' : 'danger'"
-                                        class="whitespace-nowrap"
-                                        x-on:click.prevent="
-                                            $wire.getProductSizes({{ (int) $row['id'] }}).then(data => {
-                                                window.dispatchEvent(new CustomEvent('open-size-modal', { detail: data }));
-                                            });
-                                        "
-                                    >
-                                        ⚙️ Variantlar
-                                    </x-filament::button>
-                                    @endunless
-
-
                                 </td>
-
-                                {{-- Kelgan narxi --}}
-                                <td class="px-3 py-3 text-right">
-                                    <div>
-                                        <input type="number"
-                                               disabled
-                                               value="{{ $row['initial_price'] }}"
-                                               class="w-24 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white
-                                                  focus:ring-primary-500 focus:border-primary-500 rounded-md shadow-sm text-right
-                                                  py-1.5 px-2 text-sm">
-                                    </div>
-                                </td>
-
-                                {{-- Narx --}}
-                                <td class="px-3 py-3 text-right">
-                                    <div
-                                        wire:key="price-input-{{ $activeCartId }}-{{ $row['id'] }}"
-                                        x-data="{
-                                            oldValue: {{ $row['price'] }},
-                                            updatePrice(event) {
-                                                const newPrice = parseFloat(event.target.value);
-                                                $wire.updatePrice({{ $row['id'] }}, newPrice)
-                                                    .then(result => {
-                                                        if (result === false) {
-                                                            // ❌ Xato bo‘lsa, eski qiymatni qaytarish
-                                                            event.target.value = this.oldValue;
-                                                        } else {
-                                                            // ✅ To‘g‘ri bo‘lsa, yangi qiymatni saqlash
-                                                            this.oldValue = newPrice;
-                                                        }
-                                                    });
-                                            }
-                                        }"
-                                    >
-                                        <input type="number"
-                                               min="1"
-                                               value="{{ $row['price'] }}"
-                                               @change="updatePrice($event)"
-                                               class="w-24 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white
-                                                  focus:ring-primary-500 focus:border-primary-500 rounded-md shadow-sm text-right
-                                                  py-1.5 px-2 text-sm">
-                                    </div>
-                                </td>
-
-
-                                <td class="px-3 py-3 text-right font-semibold text-gray-800 dark:text-gray-200 whitespace-nowrap">
-                                    @php
-                                        // Razmerli mahsulotlar uchun sizes yig'indisi prioritet
-                                        $totalQty = isset($row['sizes']) && !empty($row['sizes'])
-                                            ? array_sum($row['sizes'])
-                                            : ($row['qty'] ?? 0);
-                                    @endphp
-                                    {{ number_format($totalQty * $row['price'], 0,'.',' ') }}
-                                </td>
-
+                                @if($hasVariants)
+                                    <td class="px-3 py-3 text-center">
+                                        @if($row['variant_id'] !== null)
+                                            <span class="inline-flex min-w-10 items-center justify-center rounded-md bg-gray-100 px-3 py-1.5 font-medium dark:bg-gray-700">{{ $row['variant_name'] }}</span>
+                                        @else
+                                            <span class="text-gray-400">—</span>
+                                        @endif
+                                    </td>
+                                @endif
                                 <td class="px-3 py-3 text-center">
-                                    <button wire:click="remove({{ $row['id'] }})"
-                                            class="text-danger-600 hover:text-danger-800 dark:text-danger-500 dark:hover:text-danger-400
-                                                p-1.5 rounded-md hover:bg-danger-50 dark:hover:bg-danger-900/50"
-                                            title="O'chirish">
-                                        <x-heroicon-o-trash class="w-5 h-5"/>
+                                    <div class="flex items-center justify-center gap-1">
+                                        <x-filament::button
+                                            type="button"
+                                            color="gray"
+                                            size="sm"
+                                            aria-label="Miqdorni kamaytirish"
+                                            data-testid="quantity-decrease-{{ $lineKey }}"
+                                            wire:click="{{ $quantityMethod }}({{ $quantityArguments }}, {{ $row['qty'] - 1 }})"
+                                            :disabled="$row['variant_id'] === null && $row['qty'] <= 1"
+                                            class="h-8 w-8 shrink-0"
+                                        >
+                                            <span class="text-lg leading-none" aria-hidden="true">−</span>
+                                        </x-filament::button>
+                                        <div wire:key="quantity-{{ $lineKey }}-{{ $row['qty'] }}" x-data="{ previousQuantity: {{ $row['qty'] }} }">
+                                            <input type="number" aria-label="{{ $row['name'] }} {{ $row['variant_name'] }} miqdori" min="1" max="{{ $row['available'] }}" step="1" value="{{ $row['qty'] }}"
+                                                x-on:change="const quantity = Number($event.target.value); if (!Number.isInteger(quantity) || quantity < 1) { $event.target.value = previousQuantity; } else { $wire.{{ $quantityMethod }}({{ $quantityArguments }}, quantity).then(result => { if (result === false) { $event.target.value = previousQuantity; } }); }"
+                                                class="w-16 rounded-md border-gray-300 bg-white px-1 py-1.5 text-center text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"/>
+                                        </div>
+                                        <x-filament::button
+                                            type="button"
+                                            color="gray"
+                                            size="sm"
+                                            aria-label="Miqdorni oshirish"
+                                            data-testid="quantity-increase-{{ $lineKey }}"
+                                            wire:click="{{ $quantityMethod }}({{ $quantityArguments }}, {{ $row['qty'] + 1 }})"
+                                            :disabled="$row['qty'] >= $row['available']"
+                                            class="h-8 w-8 shrink-0"
+                                        >
+                                            <span class="text-lg leading-none" aria-hidden="true">+</span>
+                                        </x-filament::button>
+                                    </div>
+                                    <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">Mavjud: {{ $row['available'] }} dona</div>
+                                </td>
+                                <td class="px-3 py-3 text-right">
+                                    <div wire:key="price-{{ $lineKey }}-{{ $row['price'] }}" x-data="{ previousPrice: {{ $row['price'] }} }">
+                                        <input type="number" aria-label="{{ $row['name'] }} sotish narxi" min="1" step="any" value="{{ $row['price'] }}"
+                                            x-on:change="const price = Number($event.target.value); if (!Number.isFinite(price) || price < 1) { $event.target.value = previousPrice; } else { $wire.updatePrice({{ $row['id'] }}, price).then(result => { if (result === false) { $event.target.value = previousPrice; } }); }"
+                                            class="w-28 rounded-md border-gray-300 bg-white px-2 py-1.5 text-right text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"/>
+                                    </div>
+                                </td>
+                                <td class="whitespace-nowrap px-3 py-3 text-right font-semibold">{{ number_format($row['qty'] * $row['price'], 0, '.', ' ') }}</td>
+                                <td class="px-3 py-3 text-center">
+                                    <button type="button" wire:click="{{ $row['variant_id'] === null ? 'remove(' . $row['id'] . ')' : 'updateVariantQty(' . $row['id'] . ', ' . $row['variant_id'] . ', 0)' }}" title="O'chirish" aria-label="{{ $row['name'] }} {{ $row['variant_name'] }} ni o'chirish" class="rounded-md p-1.5 text-danger-600 hover:bg-danger-50 dark:text-danger-500 dark:hover:bg-danger-900/50">
+                                        <x-heroicon-o-trash class="h-5 w-5"/>
                                     </button>
                                 </td>
                             </tr>
                         @endforeach
                         </tbody>
                     </table>
-
                 </div>
 
                 {{-- === Totallar va tugmalar === --}}
@@ -857,67 +815,7 @@
         </x-filament::card>
     </div>
 
-    {{-- 🔹 Razmer tanlash modal --}}
-    <div
-        x-data="{ open: false, product: null, sizes: [], quantities: {} }"
-        x-on:open-size-modal.window="
-        open = true;
-        product = $event.detail.product;
-        sizes = $event.detail.sizes;
-        quantities = $event.detail.quantities ?? {};
-    "
-        x-show="open"
-        class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50"
-        x-transition
-    >
-        <div
-            class="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4 relative"
-            @click.outside="open = false"
-            x-transition
-        >
-            <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                <span x-text="product?.name ?? 'Mahsulot'"></span> — <span x-text="product?.variant_plural_label ?? 'Variantlar'"></span>
-            </h2>
 
-            <template x-if="sizes.length > 0">
-                <div class="space-y-3 max-h-64 overflow-y-auto pr-2">
-                    <template x-for="(size, index) in sizes" :key="index">
-                        <div class="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-2">
-                            <span class="text-sm text-gray-700 dark:text-gray-300" x-text="size.name"></span>
-                            <input
-                                type="number"
-                                min="0"
-                                class="w-24 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm text-right py-1.5 px-2 text-sm focus:ring-primary-500 focus:border-primary-500"
-                                x-model.number="quantities[size.id]"
-                            >
-                        </div>
-                    </template>
-                </div>
-            </template>
-
-            <template x-if="sizes.length === 0">
-                <p class="text-sm text-gray-500 dark:text-gray-400">
-                    Bu mahsulot uchun <span x-text="product?.variant_plural_label ?? 'variantlar'"></span> mavjud emas
-                </p>
-            </template>
-
-            <div class="flex justify-end gap-2 mt-6">
-                <button
-                    @click="open = false"
-                    class="bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-md text-sm"
-                >
-                    Yopish
-                </button>
-                <button
-                    wire:key="qty-size-input-{{ $activeCartId }}-product.id"
-                    @click="$wire.updateSizes(product.id, quantities); open = false;"
-                    class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md text-sm font-semibold"
-                >
-                    Saqlash
-                </button>
-            </div>
-        </div>
-    </div>
 
     {{-- Klient tanlash inline panel --}}
     @if($showClientPanel)

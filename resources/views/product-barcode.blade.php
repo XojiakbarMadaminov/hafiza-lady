@@ -54,6 +54,27 @@
             margin: 0 auto;
         }
 
+        .label-compact {
+            padding: 0.5mm;
+            font-size: 0;
+            line-height: 0;
+        }
+
+        .label-compact .product-name {
+            margin: 0 auto;
+        }
+
+        .label-compact .label-name {
+            height: 22px;
+            line-height: 9px;
+            overflow: hidden;
+        }
+
+        .label-compact .barcode {
+            height: 20px;
+            line-height: 0;
+        }
+
     </style>
 </head>
 <body>
@@ -73,7 +94,7 @@
                 return '7px';
             },
             'name_max'   => 40,
-            'barcode'    => ['scale' => 1.0, 'height' => 22],
+            'barcode'    => ['scale' => 1.0, 'height' => 20],
             'code_font'  => '8px',
             'price_font' => function (int $len): string {
                 if ($len <= 12) { return '9px'; }
@@ -155,8 +176,8 @@
         $discountPriceFont = round($priceFontPx * 0.55, 1) . 'px';
     @endphp
 
-    <div class="label">
-        <div class="product-name" style="font-size: {{ $nameFont }}">{{ $name }}</div>
+    <div @class(['label', 'label-compact' => $labelSize === '30x20'])>
+        <div class="product-name label-name" style="font-size: {{ $nameFont }}">{{ $name }}</div>
 
         <div class="barcode">
             <div style="display:inline-block;">
@@ -176,7 +197,7 @@
                 </div>
             </div>
         @else
-            <div class="product-name" style="font-size: {{ $priceFont }}; font-weight: 700; margin-top: 1mm;">
+            <div class="product-name" style="font-size: {{ $priceFont }}; font-weight: 700; margin-top: {{ $labelSize === '30x20' ? '0' : '1mm' }};">
                 {{ $priceStr }}
             </div>
         @endif
