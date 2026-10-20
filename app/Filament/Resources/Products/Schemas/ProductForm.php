@@ -30,7 +30,6 @@ class ProductForm
                     ->schema([
                         TextInput::make('name')
                             ->label('Nomi')
-                            ->unique()
                             ->required()
                             ->columnSpanFull(),
 
