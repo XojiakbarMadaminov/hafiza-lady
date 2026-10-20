@@ -31,7 +31,8 @@ class Product extends Model implements HasMedia
     protected static bool $missingImageDriverLogged = false;
 
     protected $casts = [
-        'type' => 'string',
+        'type'        => 'string',
+        'import_code' => 'integer',
     ];
 
     public function sizes()

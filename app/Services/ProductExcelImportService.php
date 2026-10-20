@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\Stock;
+use App\Models\Store;
 use App\Helpers\Helper;
 use App\Models\Product;
 use OpenSpout\Common\Entity\Row;
@@ -17,18 +18,28 @@ class ProductExcelImportService
 {
     public const HEADERS = ['id', 'nomi', 'kelgan_narx', 'sotuv_narxi', 'soni'];
 
+    public function nextImportCode(User $user): int
+    {
+        abort_unless($user->hasRole('super_admin'), 403);
+        abort_unless($user->current_store_id, 403);
+
+        return (int) Product::withoutGlobalScope('current_store')->withTrashed()
+            ->where('store_id', $user->current_store_id)->max('import_code') + 1;
+    }
+
     public function writeExample(string $path, User $user): void
     {
         abort_unless($user->hasRole('super_admin'), 403);
 
-        $writer = new Writer;
+        $firstCode = $this->nextImportCode($user);
+        $writer    = new Writer;
         $writer->openToFile($path);
 
         try {
             $writer->addRow(Row::fromValues(self::HEADERS));
 
-            for ($productId = 1; $productId <= 1000; $productId++) {
-                $writer->addRow(Row::fromValues([$productId, '', '', '', '']));
+            for ($offset = 0; $offset < 1000; $offset++) {
+                $writer->addRow(Row::fromValues([$firstCode + $offset, '', '', '', '']));
             }
         } finally {
             $writer->close();
@@ -54,6 +65,7 @@ class ProductExcelImportService
             $reader->open($path);
 
             return (new Product)->getConnection()->transaction(function () use ($reader, $user, $stock): array {
+                Store::query()->whereKey($user->current_store_id)->lockForUpdate()->firstOrFail();
                 $counts = ['created' => 0, 'updated' => 0, 'skipped' => 0];
 
                 foreach ($reader->getSheetIterator() as $sheet) {
@@ -87,7 +99,7 @@ class ProductExcelImportService
                         ];
 
                         $validator = Validator::make($data, [
-                            'id'            => ['required', 'integer', 'min:1', 'max:' . (PHP_INT_MAX - 1)],
+                            'id'            => ['required', 'integer', 'min:1', 'max:' . (PHP_INT_MAX - 1000)],
                             'name'          => ['required', 'string', 'max:255'],
                             'initial_price' => ['required', 'integer', 'min:0', 'max:' . PHP_INT_MAX],
                             'price'         => ['required', 'integer', 'min:0', 'max:' . PHP_INT_MAX],
@@ -98,10 +110,13 @@ class ProductExcelImportService
                             throw ValidationException::withMessages(['file' => "{$rowNumber}-qator: " . $validator->errors()->first()]);
                         }
 
-                        $product = Product::withoutGlobalScope('current_store')->withTrashed()->find($data['id']);
+                        $product = Product::withoutGlobalScope('current_store')->withTrashed()
+                            ->where('store_id', $user->current_store_id)
+                            ->where('import_code', $data['id'])
+                            ->lockForUpdate()->first();
 
-                        if ($product && ($product->trashed() || (int) $product->store_id !== (int) $user->current_store_id)) {
-                            throw ValidationException::withMessages(['file' => "{$rowNumber}-qator: ID boshqa do‘konga tegishli yoki mahsulot o‘chirilgan."]);
+                        if ($product?->trashed()) {
+                            throw ValidationException::withMessages(['file' => "{$rowNumber}-qator: bu import kodidagi mahsulot o‘chirilgan. Uni tiklang yoki yangi koddan foydalaning."]);
                         }
 
                         if ($product && !$product->isPackageBased()) {
@@ -109,7 +124,7 @@ class ProductExcelImportService
                         }
 
                         $isNew = !$product;
-                        $product ??= new Product(['id' => $data['id'], 'store_id' => $user->current_store_id, 'type' => Product::TYPE_PACKAGE]);
+                        $product ??= new Product(['import_code' => $data['id'], 'store_id' => $user->current_store_id, 'type' => Product::TYPE_PACKAGE]);
                         if (blank($product->barcode)) {
                             $product->barcode = $this->generateUniqueBarcode();
                         }
@@ -123,12 +138,6 @@ class ProductExcelImportService
                     }
 
                     break;
-                }
-
-                $connection = (new Product)->getConnection();
-
-                if ($counts['created'] > 0 && $connection->getDriverName() === 'pgsql') {
-                    $connection->statement("SELECT setval(pg_get_serial_sequence('products', 'id'), GREATEST((SELECT MAX(id) FROM products), nextval(pg_get_serial_sequence('products', 'id'))), true)");
                 }
 
                 return $counts;

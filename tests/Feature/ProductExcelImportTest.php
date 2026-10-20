@@ -88,11 +88,11 @@ it('downloads an excel example containing exactly ids one through one thousand',
         ->assertFileDownloaded('products-import-example.xlsx');
 });
 
-it('creates and updates products by id and replaces the selected stock quantity', function () {
-    $product = Product::factory()->create(['store_id' => $this->store->id, 'barcode' => 'KEEP-BARCODE']);
+it('creates and updates products by import code and replaces the selected stock quantity', function () {
+    $product = Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 25, 'barcode' => 'KEEP-BARCODE']);
     $product->productStocks()->create(['stock_id' => $this->stock->id, 'quantity' => 5]);
     $path = ($this->makeExcel)([
-        [$product->id, 'Updated product', 10000, 15000, 12],
+        [25, 'Updated product', 10000, 15000, 12],
         [1000, 'New product', 20000, 30000, 8],
     ]);
 
@@ -104,8 +104,9 @@ it('creates and updates products by id and replaces the selected stock quantity'
         ->and($product->initial_price)->toBe(10000)
         ->and($product->price)->toBe(15000)
         ->and($product->productStocks()->sole()->quantity)->toBe(12)
-        ->and(Product::findOrFail(1000)->store_id)->toBe($this->store->id)
-        ->and(Product::findOrFail(1000)->type)->toBe(Product::TYPE_PACKAGE);
+        ->and(Product::where('import_code', 1000)->sole()->store_id)->toBe($this->store->id)
+        ->and(Product::where('import_code', 1000)->sole()->type)->toBe(Product::TYPE_PACKAGE)
+        ->and(Product::where('import_code', 1000)->sole()->id)->not->toBe(1000);
 
     expect($this->service->import($path, $this->user, $this->stock->id))
         ->toBe(['created' => 0, 'updated' => 2, 'skipped' => 0])
@@ -113,16 +114,16 @@ it('creates and updates products by id and replaces the selected stock quantity'
 });
 
 it('stores numeric excel product names as strings on creation and update', function (int|float|string $name, string $expectedName) {
-    $product = Product::factory()->create(['store_id' => $this->store->id]);
+    $product = Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 25]);
     $path    = ($this->makeExcel)([
-        [$product->id, $name, 60, 100, 10],
+        [25, $name, 60, 100, 10],
         [1000, $name, 60, 100, 10],
     ]);
 
     expect($this->service->import($path, $this->user, $this->stock->id))
         ->toBe(['created' => 1, 'updated' => 1, 'skipped' => 0])
         ->and($product->refresh()->name)->toBe($expectedName)
-        ->and(Product::findOrFail(1000)->name)->toBe($expectedName);
+        ->and(Product::where('import_code', 1000)->sole()->name)->toBe($expectedName);
 })->with([
     'integer'                           => [1, '1'],
     'zero'                              => [0, '0'],
@@ -133,17 +134,17 @@ it('stores numeric excel product names as strings on creation and update', funct
 ]);
 
 it('generates unique valid ean thirteen barcodes only when missing and preserves them on reimport', function (?string $missingBarcode) {
-    $withoutBarcode = Product::factory()->create(['store_id' => $this->store->id, 'barcode' => $missingBarcode]);
-    $withBarcode    = Product::factory()->create(['store_id' => $this->store->id, 'barcode' => '1234567890128']);
+    $withoutBarcode = Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 25, 'barcode' => $missingBarcode]);
+    $withBarcode    = Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 26, 'barcode' => '1234567890128']);
     $skipped        = Product::factory()->create(['store_id' => $this->store->id, 'barcode' => 'KEEP-SKIPPED']);
     $path           = ($this->makeExcel)([
-        [$withoutBarcode->id, 'Previously without barcode', 10, 20, 1],
-        [$withBarcode->id, 'Previously with barcode', 10, 20, 1],
+        [25, 'Previously without barcode', 10, 20, 1],
+        [26, 'Previously with barcode', 10, 20, 1],
         [$skipped->id, '', '', '', ''],
         [1000, 'New product', 10, 20, 1],
     ]);
     $this->service->import($path, $this->user, $this->stock->id);
-    $barcodes = Product::query()->whereKey([$withoutBarcode->id, $withBarcode->id, 1000])->pluck('barcode')->all();
+    $barcodes = Product::query()->whereIn('import_code', [25, 26, 1000])->orderBy('import_code')->pluck('barcode')->all();
 
     expect(array_unique($barcodes))->toHaveCount(3)
         ->and($withBarcode->fresh()->barcode)->toBe('1234567890128')
@@ -161,7 +162,7 @@ it('generates unique valid ean thirteen barcodes only when missing and preserves
     }
 
     $this->service->import($path, $this->user, $this->stock->id);
-    $newBarcodes = Product::query()->whereKey([$withoutBarcode->id, $withBarcode->id, 1000])->pluck('barcode')->all();
+    $newBarcodes = Product::query()->whereIn('import_code', [25, 26, 1000])->orderBy('import_code')->pluck('barcode')->all();
 
     expect($newBarcodes)->toBe($barcodes)
         ->and(array_unique($newBarcodes))->toHaveCount(3);
@@ -192,7 +193,7 @@ it('imports an uploaded xlsx through the products list action', function () {
         ->assertHasNoActionErrors()
         ->assertNotified('Import yakunlandi');
 
-    expect(Product::findOrFail(1000)->name)->toBe('Uploaded product');
+    expect(Product::where('import_code', 1000)->sole()->name)->toBe('Uploaded product');
 });
 
 it('denies both actions and service access to all non super admin roles', function (string $role) {
@@ -272,19 +273,25 @@ it('rejects a corrupt xlsx file without creating products', function () {
         ->and(Product::query()->count())->toBe(0);
 });
 
-it('does not update products from another store or deleted products', function (bool $deleted) {
+it('isolates import codes by store and reserves deleted product codes', function (bool $deleted) {
     $otherStore = Store::query()->create(['name' => 'Other store', 'address' => fake()->address(), 'phone' => fake()->phoneNumber()]);
-    $product    = Product::factory()->create(['store_id' => $deleted ? $this->store->id : $otherStore->id]);
+    $product    = Product::factory()->create(['store_id' => $deleted ? $this->store->id : $otherStore->id, 'import_code' => 25]);
 
     if ($deleted) {
         $product->delete();
     }
 
-    $path = ($this->makeExcel)([[$product->id, 'Do not update', 10, 20, 1]]);
+    $path = ($this->makeExcel)([[25, 'Do not update', 10, 20, 1]]);
 
-    expect(fn () => $this->service->import($path, $this->user, $this->stock->id))
-        ->toThrow(ValidationException::class)
-        ->and($product->fresh()->name)->toBe($product->name);
+    if ($deleted) {
+        expect(fn () => $this->service->import($path, $this->user, $this->stock->id))
+            ->toThrow(ValidationException::class);
+    } else {
+        expect($this->service->import($path, $this->user, $this->stock->id))
+            ->toBe(['created' => 1, 'updated' => 0, 'skipped' => 0]);
+    }
+
+    expect(Product::withoutGlobalScope('current_store')->withTrashed()->findOrFail($product->id)->name)->toBe($product->name);
 })->with([false, true]);
 
 it('rejects inactive or unrelated stocks', function (bool $inactive) {
@@ -302,10 +309,81 @@ it('rejects inactive or unrelated stocks', function (bool $inactive) {
 })->with([false, true]);
 
 it('does not silently convert size or color products to package products', function (string $type) {
-    $product = Product::factory()->create(['store_id' => $this->store->id, 'type' => $type]);
-    $path    = ($this->makeExcel)([[$product->id, 'Changed name', 10, 20, 1]]);
+    $product = Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 25, 'type' => $type]);
+    $path    = ($this->makeExcel)([[25, 'Changed name', 10, 20, 1]]);
 
     expect(fn () => $this->service->import($path, $this->user, $this->stock->id))
         ->toThrow(ValidationException::class)
         ->and($product->fresh()->type)->toBe($type);
 })->with([Product::TYPE_SIZE, Product::TYPE_COLOR]);
+
+it('never matches manually created products by their database ids', function (string $type) {
+    $this->service->import(($this->makeExcel)(collect(range(1, 10))
+        ->map(fn (int $code): array => [$code, "Imported {$code}", 10, 20, 1])->all()), $this->user, $this->stock->id);
+    $manualProducts = Product::factory()->count(5)->create(['store_id' => $this->store->id, 'type' => $type]);
+    $manual         = $manualProducts->first();
+    $path           = ($this->makeExcel)([[$manual->id, 'New Excel product', 30, 40, 7]]);
+
+    expect($this->service->import($path, $this->user, $this->stock->id))
+        ->toBe(['created' => 1, 'updated' => 0, 'skipped' => 0])
+        ->and(Product::query()->count())->toBe(16)
+        ->and($manual->fresh()->name)->toBe($manual->name)
+        ->and($manual->fresh()->barcode)->toBe($manual->barcode)
+        ->and($manual->fresh()->import_code)->toBeNull();
+
+    $imported = Product::where('import_code', $manual->id)->sole();
+    expect($imported->id)->not->toBe($manual->id)
+        ->and($imported->name)->toBe('New Excel product');
+
+    expect($this->service->import($path, $this->user, $this->stock->id))
+        ->toBe(['created' => 0, 'updated' => 1, 'skipped' => 0])
+        ->and(Product::query()->count())->toBe(16);
+})->with([Product::TYPE_PACKAGE, Product::TYPE_SIZE, Product::TYPE_COLOR]);
+
+it('starts the thousand row example after the largest code including deleted products in the current store', function () {
+    Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 124]);
+    Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 125])->delete();
+    Product::factory()->create(['store_id' => $this->store->id, 'id' => 5000]);
+    $otherStore = Store::query()->create(['name' => 'Other store', 'address' => fake()->address(), 'phone' => fake()->phoneNumber()]);
+    Product::factory()->create(['store_id' => $otherStore->id, 'import_code' => 9000]);
+
+    expect($this->service->nextImportCode($this->user))->toBe(126);
+
+    $path = ($this->makeExcel)([]);
+    $this->service->writeExample($path, $this->user);
+    $reader = new Reader;
+    $reader->open($path);
+    $codes = [];
+
+    try {
+        foreach ($reader->getSheetIterator() as $sheet) {
+            foreach ($sheet->getRowIterator() as $rowNumber => $row) {
+                if ($rowNumber > 1) {
+                    $codes[] = $row->toArray()[0];
+                }
+            }
+        }
+    } finally {
+        $reader->close();
+    }
+
+    expect($codes)->toBe(range(126, 1125))
+        ->and($this->service->import($path, $this->user, $this->stock->id))
+        ->toBe(['created' => 0, 'updated' => 0, 'skipped' => 1000])
+        ->and($this->service->nextImportCode($this->user))->toBe(126);
+});
+
+it('keeps import codes internal while advancing them after a list page import', function () {
+    $path   = ($this->makeExcel)([[10, 'New product', 100, 200, 4]]);
+    $upload = UploadedFile::fake()->createWithContent('products.xlsx', file_get_contents($path));
+
+    Livewire::test(ListProducts::class)
+        ->assertDontSee('Keyingi import kodi:')
+        ->assertTableColumnDoesNotExist('import_code')
+        ->callAction('importProducts', ['stock_id' => $this->stock->id, 'file' => $upload])
+        ->assertHasNoActionErrors()
+        ->assertDontSee('Keyingi import kodi:')
+        ->assertTableColumnDoesNotExist('import_code');
+
+    expect($this->service->nextImportCode($this->user))->toBe(11);
+});
