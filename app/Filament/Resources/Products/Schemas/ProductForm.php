@@ -108,8 +108,7 @@ class ProductForm
                                             foreach ($stocks as $id => $name) {
                                                 $fields[] = TextInput::make("stock_{$id}")
                                                     ->label($name)
-                                                    ->numeric()
-                                                    ->default(0);
+                                                    ->numeric();
                                             }
 
                                             return $fields;
@@ -134,8 +133,7 @@ class ProductForm
                                     foreach ($stocks as $id => $name) {
                                         $fields[] = TextInput::make("pkg_stock_{$id}")
                                             ->label($name)
-                                            ->numeric()
-                                            ->default(0);
+                                            ->numeric();
                                     }
 
                                     return $fields;
