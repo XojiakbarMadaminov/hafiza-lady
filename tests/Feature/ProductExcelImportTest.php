@@ -62,7 +62,7 @@ afterEach(function () {
     }
 });
 
-it('downloads an excel example containing exactly ids one through one thousand', function () {
+it('downloads an excel example containing codes one through one thousand as text', function () {
     $path = ($this->makeExcel)([]);
     $this->service->writeExample($path, $this->user);
     $reader = new Reader;
@@ -81,7 +81,7 @@ it('downloads an excel example containing exactly ids one through one thousand',
 
     expect($rows)->toHaveCount(1001)
         ->and($rows[0])->toBe(ProductExcelImportService::HEADERS)
-        ->and(array_column(array_slice($rows, 1), 0))->toBe(range(1, 1000));
+        ->and(array_column(array_slice($rows, 1), 0))->toBe(array_map('strval', range(1, 1000)));
 
     Livewire::test(ListProducts::class)
         ->callAction('downloadImportExample')
@@ -111,6 +111,28 @@ it('creates and updates products by import code and replaces the selected stock 
     expect($this->service->import($path, $this->user, $this->stock->id))
         ->toBe(['created' => 0, 'updated' => 2, 'skipped' => 0])
         ->and(ProductStock::query()->count())->toBe(2);
+});
+
+it('accepts legacy id headers as product codes without matching database ids', function () {
+    $product = Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 701]);
+    $path    = ($this->makeExcel)([[701, 'Legacy header product', 10, 20, 3]], ProductExcelImportService::LEGACY_HEADERS);
+
+    expect($this->service->import($path, $this->user, $this->stock->id))
+        ->toBe(['created' => 0, 'updated' => 1, 'skipped' => 0])
+        ->and($product->fresh()->name)->toBe('Legacy header product');
+});
+
+it('updates manually created products by their automatically assigned codes', function () {
+    Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 700]);
+    $manual = Product::factory()->create(['store_id' => $this->store->id]);
+    $path   = ($this->makeExcel)([[$manual->import_code, 'Updated manual product', 10, 20, 3]]);
+
+    expect($manual->import_code)->toBe(701)
+        ->and($this->service->import($path, $this->user, $this->stock->id))
+        ->toBe(['created' => 0, 'updated' => 1, 'skipped' => 0])
+        ->and($manual->fresh()->name)->toBe('Updated manual product')
+        ->and($manual->fresh()->import_code)->toBe(701)
+        ->and($this->service->nextImportCode($this->user))->toBe(702);
 });
 
 it('stores numeric excel product names as strings on creation and update', function (int|float|string $name, string $expectedName) {
@@ -264,6 +286,21 @@ it('rejects missing or incorrect column headers', function () {
     expect(fn () => $this->service->import($path, $this->user, $this->stock->id))->toThrow(ValidationException::class);
 });
 
+it('rejects duplicate codes without partially changing existing products or the sequence', function () {
+    $product = Product::factory()->create(['store_id' => $this->store->id, 'import_code' => 80]);
+    $path    = ($this->makeExcel)([
+        [80, 'Must be rolled back', 10, 20, 2],
+        [900, 'New product', 10, 20, 2],
+        [80, 'Duplicate code', 10, 20, 3],
+    ]);
+
+    expect(fn () => $this->service->import($path, $this->user, $this->stock->id))
+        ->toThrow(ValidationException::class)
+        ->and($product->fresh()->name)->toBe($product->name)
+        ->and(Product::query()->count())->toBe(1)
+        ->and($this->service->nextImportCode($this->user))->toBe(81);
+});
+
 it('rejects a corrupt xlsx file without creating products', function () {
     $path               = tempnam(sys_get_temp_dir(), 'invalid-excel-');
     $this->excelPaths[] = $path;
@@ -319,7 +356,7 @@ it('does not silently convert size or color products to package products', funct
 
 it('never matches manually created products by their database ids', function (string $type) {
     $this->service->import(($this->makeExcel)(collect(range(1, 10))
-        ->map(fn (int $code): array => [$code, "Imported {$code}", 10, 20, 1])->all()), $this->user, $this->stock->id);
+        ->map(fn (int $code): array => [$code + 100, "Imported {$code}", 10, 20, 1])->all()), $this->user, $this->stock->id);
     $manualProducts = Product::factory()->count(5)->create(['store_id' => $this->store->id, 'type' => $type]);
     $manual         = $manualProducts->first();
     $path           = ($this->makeExcel)([[$manual->id, 'New Excel product', 30, 40, 7]]);
@@ -329,7 +366,7 @@ it('never matches manually created products by their database ids', function (st
         ->and(Product::query()->count())->toBe(16)
         ->and($manual->fresh()->name)->toBe($manual->name)
         ->and($manual->fresh()->barcode)->toBe($manual->barcode)
-        ->and($manual->fresh()->import_code)->toBeNull();
+        ->and($manual->fresh()->import_code)->toBe(111);
 
     $imported = Product::where('import_code', $manual->id)->sole();
     expect($imported->id)->not->toBe($manual->id)
@@ -347,7 +384,7 @@ it('starts the thousand row example after the largest code including deleted pro
     $otherStore = Store::query()->create(['name' => 'Other store', 'address' => fake()->address(), 'phone' => fake()->phoneNumber()]);
     Product::factory()->create(['store_id' => $otherStore->id, 'import_code' => 9000]);
 
-    expect($this->service->nextImportCode($this->user))->toBe(126);
+    expect($this->service->nextImportCode($this->user))->toBe(127);
 
     $path = ($this->makeExcel)([]);
     $this->service->writeExample($path, $this->user);
@@ -367,23 +404,54 @@ it('starts the thousand row example after the largest code including deleted pro
         $reader->close();
     }
 
-    expect($codes)->toBe(range(126, 1125))
+    expect($codes)->toBe(array_map('strval', range(127, 1126)))
         ->and($this->service->import($path, $this->user, $this->stock->id))
         ->toBe(['created' => 0, 'updated' => 0, 'skipped' => 1000])
-        ->and($this->service->nextImportCode($this->user))->toBe(126);
+        ->and($this->service->nextImportCode($this->user))->toBe(127);
 });
 
-it('keeps import codes internal while advancing them after a list page import', function () {
+it('shows only product codes while advancing them after a list page import', function () {
     $path   = ($this->makeExcel)([[10, 'New product', 100, 200, 4]]);
     $upload = UploadedFile::fake()->createWithContent('products.xlsx', file_get_contents($path));
 
     Livewire::test(ListProducts::class)
         ->assertDontSee('Keyingi import kodi:')
-        ->assertTableColumnDoesNotExist('import_code')
+        ->assertTableColumnExists('import_code')
+        ->assertTableColumnDoesNotExist('id')
         ->callAction('importProducts', ['stock_id' => $this->stock->id, 'file' => $upload])
         ->assertHasNoActionErrors()
         ->assertDontSee('Keyingi import kodi:')
-        ->assertTableColumnDoesNotExist('import_code');
+        ->assertTableColumnExists('import_code')
+        ->assertTableColumnDoesNotExist('id')
+        ->assertCanSeeTableRecords(Product::query()->get())
+        ->searchTableColumns(['import_code' => '10'])
+        ->assertCanSeeTableRecords(Product::query()->where('import_code', 10)->get());
 
     expect($this->service->nextImportCode($this->user))->toBe(11);
+});
+
+it('never generates example codes beyond the supported integer range', function () {
+    $this->store->update(['last_product_code' => PHP_INT_MAX - 1001]);
+    $path = ($this->makeExcel)([]);
+    $this->service->writeExample($path, $this->user);
+    $reader = new Reader;
+    $reader->open($path);
+    $codes = [];
+
+    try {
+        foreach ($reader->getSheetIterator() as $sheet) {
+            foreach ($sheet->getRowIterator() as $rowNumber => $row) {
+                if ($rowNumber > 1) {
+                    $codes[] = $row->toArray()[0];
+                }
+            }
+        }
+    } finally {
+        $reader->close();
+    }
+
+    expect($codes)->toBe([(string) (PHP_INT_MAX - 1000)]);
+    $this->store->update(['last_product_code' => PHP_INT_MAX - 1000]);
+
+    expect(fn () => $this->service->nextImportCode($this->user))->toThrow(ValidationException::class);
 });

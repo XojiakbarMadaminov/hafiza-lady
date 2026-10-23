@@ -16,15 +16,26 @@ use OpenSpout\Common\Exception\OpenSpoutException;
 
 class ProductExcelImportService
 {
-    public const HEADERS = ['id', 'nomi', 'kelgan_narx', 'sotuv_narxi', 'soni'];
+    public const HEADERS = ['tovar_kodi', 'nomi', 'kelgan_narx', 'sotuv_narxi', 'soni'];
+
+    public const LEGACY_HEADERS = ['id', 'nomi', 'kelgan_narx', 'sotuv_narxi', 'soni'];
 
     public function nextImportCode(User $user): int
     {
         abort_unless($user->hasRole('super_admin'), 403);
         abort_unless($user->current_store_id, 403);
 
-        return (int) Product::withoutGlobalScope('current_store')->withTrashed()
-            ->where('store_id', $user->current_store_id)->max('import_code') + 1;
+        $lastCode = max(
+            (int) Store::query()->whereKey($user->current_store_id)->value('last_product_code'),
+            (int) Product::withoutGlobalScope('current_store')->withTrashed()
+                ->where('store_id', $user->current_store_id)->max('import_code'),
+        );
+
+        if ($lastCode >= PHP_INT_MAX - 1000) {
+            throw ValidationException::withMessages(['file' => 'Tovar kodlari chegarasiga yetildi.']);
+        }
+
+        return $lastCode + 1;
     }
 
     public function writeExample(string $path, User $user): void
@@ -32,14 +43,15 @@ class ProductExcelImportService
         abort_unless($user->hasRole('super_admin'), 403);
 
         $firstCode = $this->nextImportCode($user);
+        $rowCount  = min(1000, PHP_INT_MAX - 1000 - $firstCode + 1);
         $writer    = new Writer;
         $writer->openToFile($path);
 
         try {
             $writer->addRow(Row::fromValues(self::HEADERS));
 
-            for ($offset = 0; $offset < 1000; $offset++) {
-                $writer->addRow(Row::fromValues([$firstCode + $offset, '', '', '', '']));
+            for ($offset = 0; $offset < $rowCount; $offset++) {
+                $writer->addRow(Row::fromValues([(string) ($firstCode + $offset), '', '', '', '']));
             }
         } finally {
             $writer->close();
@@ -66,7 +78,8 @@ class ProductExcelImportService
 
             return (new Product)->getConnection()->transaction(function () use ($reader, $user, $stock): array {
                 Store::query()->whereKey($user->current_store_id)->lockForUpdate()->firstOrFail();
-                $counts = ['created' => 0, 'updated' => 0, 'skipped' => 0];
+                $counts    = ['created' => 0, 'updated' => 0, 'skipped' => 0];
+                $seenCodes = [];
 
                 foreach ($reader->getSheetIterator() as $sheet) {
                     $hasHeader = false;
@@ -75,7 +88,7 @@ class ProductExcelImportService
                         $values = $row->toArray();
 
                         if (!$hasHeader) {
-                            if ($values !== self::HEADERS) {
+                            if ($values !== self::HEADERS && $values !== self::LEGACY_HEADERS) {
                                 throw ValidationException::withMessages(['file' => 'Ustunlar namunadagidek bo‘lishi kerak: ' . implode(', ', self::HEADERS)]);
                             }
 
@@ -91,7 +104,7 @@ class ProductExcelImportService
                         }
 
                         $data = [
-                            'id'            => $values[0] ?? null,
+                            'tovar_kodi'    => $values[0] ?? null,
                             'name'          => is_scalar($values[1]) ? trim((string) $values[1]) : $values[1],
                             'initial_price' => $values[2],
                             'price'         => $values[3],
@@ -99,7 +112,7 @@ class ProductExcelImportService
                         ];
 
                         $validator = Validator::make($data, [
-                            'id'            => ['required', 'integer', 'min:1', 'max:' . (PHP_INT_MAX - 1000)],
+                            'tovar_kodi'    => ['required', 'integer', 'min:1', 'max:' . (PHP_INT_MAX - 1000)],
                             'name'          => ['required', 'string', 'max:255'],
                             'initial_price' => ['required', 'integer', 'min:0', 'max:' . PHP_INT_MAX],
                             'price'         => ['required', 'integer', 'min:0', 'max:' . PHP_INT_MAX],
@@ -110,13 +123,21 @@ class ProductExcelImportService
                             throw ValidationException::withMessages(['file' => "{$rowNumber}-qator: " . $validator->errors()->first()]);
                         }
 
+                        $code = (int) $data['tovar_kodi'];
+
+                        if (isset($seenCodes[$code])) {
+                            throw ValidationException::withMessages(['file' => "{$rowNumber}-qator: {$code} tovar kodi faylda takrorlangan."]);
+                        }
+
+                        $seenCodes[$code] = true;
+
                         $product = Product::withoutGlobalScope('current_store')->withTrashed()
                             ->where('store_id', $user->current_store_id)
-                            ->where('import_code', $data['id'])
+                            ->where('import_code', $code)
                             ->lockForUpdate()->first();
 
                         if ($product?->trashed()) {
-                            throw ValidationException::withMessages(['file' => "{$rowNumber}-qator: bu import kodidagi mahsulot o‘chirilgan. Uni tiklang yoki yangi koddan foydalaning."]);
+                            throw ValidationException::withMessages(['file' => "{$rowNumber}-qator: bu tovar kodidagi mahsulot o‘chirilgan. Uni tiklang yoki yangi koddan foydalaning."]);
                         }
 
                         if ($product && !$product->isPackageBased()) {
@@ -124,7 +145,7 @@ class ProductExcelImportService
                         }
 
                         $isNew = !$product;
-                        $product ??= new Product(['import_code' => $data['id'], 'store_id' => $user->current_store_id, 'type' => Product::TYPE_PACKAGE]);
+                        $product ??= new Product(['import_code' => $code, 'store_id' => $user->current_store_id, 'type' => Product::TYPE_PACKAGE]);
                         if (blank($product->barcode)) {
                             $product->barcode = $this->generateUniqueBarcode();
                         }

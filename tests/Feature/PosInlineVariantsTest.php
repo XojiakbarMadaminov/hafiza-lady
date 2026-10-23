@@ -56,7 +56,7 @@ beforeEach(function () {
 
 it('opens size choices only after pressing the variant toggle', function (string $method) {
     Livewire::test(Pos::class)
-        ->call($method, (string) ($method === 'addByBarcode' ? $this->product->barcode : $this->product->id))
+        ->call($method, (string) ($method === 'addByBarcode' ? $this->product->barcode : ($method === 'add' ? $this->product->id : $this->product->import_code)))
         ->assertSet('cart', [])
         ->assertSeeHtml('data-testid="variant-toggle-' . $this->product->id . '"')
         ->assertDontSeeHtml('data-testid="variant-picker-' . $this->product->id . '"')
@@ -67,7 +67,7 @@ it('opens size choices only after pressing the variant toggle', function (string
         ->assertSet('cart', [])
         ->call('toggleVariantPicker', $this->product->id)
         ->assertDontSeeHtml('data-testid="variant-picker-' . $this->product->id . '"');
-})->with(['addByProductId', 'addByBarcode', 'add']);
+})->with(['addByProductCode', 'addByBarcode', 'add']);
 
 it('shows inline color choices in search results', function () {
     $this->product->update(['type' => Product::TYPE_COLOR]);
@@ -93,7 +93,7 @@ it('closes variant choices when searching for another product', function (string
         ->assertDontSeeHtml('data-testid="variant-picker-' . $this->product->id . '"');
 })->with([
     'name search' => ['search', 'other'],
-    'id search'   => ['searchById', '9999'],
+    'id search'   => ['searchByCode', '9999'],
 ]);
 
 it('adds each selected variant as a separate cart line and updates totals', function () {
@@ -206,7 +206,7 @@ it('shows package quantity controls without purchase price or variant column', f
     ]);
 
     Livewire::test(Pos::class)
-        ->call('addByProductId', (string) $this->product->id)
+        ->call('addByProductCode', (string) $this->product->import_code)
         ->assertSee('Miqdorni oshirish')
         ->assertSee('Miqdorni kamaytirish')
         ->assertSeeHtmlInOrder([

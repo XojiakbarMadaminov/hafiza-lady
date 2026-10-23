@@ -147,8 +147,12 @@ class MoveProduct extends Page implements HasForms
                                                         ->where('quantity', '>', 0));
                                             })
                                             ->where(function ($query) use ($search): void {
-                                                $query->where('name', 'ilike', "%{$search}%")
-                                                    ->orWhere('barcode', 'ilike', "%{$search}%");
+                                                $query->whereLike('name', "%{$search}%")
+                                                    ->orWhereLike('barcode', "%{$search}%");
+
+                                                if (($code = Product::parseCode($search)) !== null) {
+                                                    $query->orWhere('import_code', $code);
+                                                }
                                             })
                                             ->limit(50)
                                             ->get()

@@ -3,12 +3,13 @@
 use App\Models\Product;
 use Barryvdh\DomPDF\Facade\Pdf;
 
-it('renders the product id next to the barcode label name', function () {
-    $product          = new Product;
-    $product->id      = 263;
-    $product->name    = 'BD/BC 203GC Xingx Morozilnik';
-    $product->barcode = '6959854200118';
-    $product->price   = 150000;
+it('renders only the product code next to the barcode label name', function () {
+    $product              = new Product;
+    $product->id          = 263;
+    $product->import_code = 901;
+    $product->name        = 'BD/BC 203GC Xingx Morozilnik';
+    $product->barcode     = '6959854200118';
+    $product->price       = 150000;
 
     $html = view('product-barcode', [
         'products'       => collect([$product]),
@@ -18,7 +19,8 @@ it('renders the product id next to the barcode label name', function () {
 
     expect($html)
         ->toContain('150 000')
-        ->toContain('(ID#263)')
+        ->toContain('(Kod: 901)')
+        ->not->toContain('263')
         ->not->toContain('ID 263')
         ->not->toContain('Kod 263')
         ->not->toContain('Код 263');
@@ -29,11 +31,12 @@ it('keeps each thirty by twenty millimetre barcode label on one page', function 
     $discountPrices = collect();
 
     for ($productId = 1; $productId <= $quantity; $productId++) {
-        $product          = new Product;
-        $product->id      = $productId;
-        $product->name    = $name;
-        $product->barcode = '6959854200118';
-        $product->price   = 150000;
+        $product              = new Product;
+        $product->id          = $productId;
+        $product->import_code = $productId + 1000;
+        $product->name        = $name;
+        $product->barcode     = '6959854200118';
+        $product->price       = 150000;
         $products->push($product);
 
         if ($discounted) {

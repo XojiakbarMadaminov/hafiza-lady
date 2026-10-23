@@ -139,8 +139,8 @@
 
 @foreach($products as $product)
     @php
-        $productIdSuffix = " (ID#{$product->id})";
-        $suffixLen = function_exists('mb_strlen') ? mb_strlen($productIdSuffix) : strlen($productIdSuffix);
+        $productCodeSuffix = $product->import_code !== null ? " (Kod: {$product->import_code})" : '';
+        $suffixLen = function_exists('mb_strlen') ? mb_strlen($productCodeSuffix) : strlen($productCodeSuffix);
 
         $name = (string) ($product->name ?? '');
         $len  = function_exists('mb_strlen') ? mb_strlen($name) : strlen($name);
@@ -150,7 +150,7 @@
             $len  = function_exists('mb_strlen') ? mb_strlen($name) : strlen($name);
         }
 
-        $name .= $productIdSuffix;
+        $name .= $productCodeSuffix;
         $len  = function_exists('mb_strlen') ? mb_strlen($name) : strlen($name);
 
         $nameFont   = ($cfg['name_font'])($len);

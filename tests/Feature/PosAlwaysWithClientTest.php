@@ -21,7 +21,7 @@ it('hides clientless sale controls from other roles when client is required', fu
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
+        ->call('addByProductCode', (string) $product->import_code)
         ->assertDontSeeHtml('data-testid="sale-without-client-controls"');
 });
 
@@ -30,7 +30,7 @@ it('shows clientless sale controls to privileged roles when client is required',
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
+        ->call('addByProductCode', (string) $product->import_code)
         ->assertSeeHtml('data-testid="sale-without-client-controls"');
 })->with(['admin', 'super_admin']);
 
@@ -39,7 +39,7 @@ it('shows clientless sale controls to other roles when client is not required', 
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
+        ->call('addByProductCode', (string) $product->import_code)
         ->assertSeeHtml('data-testid="sale-without-client-controls"');
 });
 
@@ -48,7 +48,7 @@ it('prevents other roles from bypassing the required client setting', function (
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
+        ->call('addByProductCode', (string) $product->import_code)
         ->set('saleWithoutClient', true)
         ->set('paymentType', 'cash')
         ->call('checkout')

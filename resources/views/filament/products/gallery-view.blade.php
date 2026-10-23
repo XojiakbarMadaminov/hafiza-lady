@@ -103,6 +103,7 @@
                         <div>
                             <div class="text-sm font-semibold text-gray-900 group-hover:text-primary-600 dark:text-white dark:group-hover:text-primary-400 line-clamp-2 md:text-base">
                                 {{ $product->name }}
+                                <span class="block text-sm text-gray-500 dark:text-gray-400">Kod: {{ $product->import_code }}</span>
                             </div>
                         </div>
                     </div>

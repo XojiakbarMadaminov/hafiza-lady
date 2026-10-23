@@ -67,9 +67,10 @@ function createVisiblePosProduct(TestCase $testCase, array $attributes = []): ar
     return [$product, $user];
 }
 
-it('searches products by id on the POS page', function () {
+it('searches products by code on the POS page', function () {
     [$product, $user] = createVisiblePosProduct($this, [
-        'name' => 'ID orqali topiladigan tovar',
+        'name'        => 'Kod orqali topiladigan tovar',
+        'import_code' => 701,
     ]);
 
     Product::factory()->create([
@@ -79,22 +80,25 @@ it('searches products by id on the POS page', function () {
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->set('searchById', (string) $product->id)
+        ->set('searchByCode', (string) $product->import_code)
         ->assertSet('search', '')
-        ->assertSee('ID orqali topiladigan tovar')
+        ->assertSee('Kod orqali topiladigan tovar')
+        ->assertSee('Tovar kodi')
+        ->assertDontSee('Tovar ID si orqali qidiring...')
         ->assertDontSee('Boshqa tovar');
 });
 
-it('adds a product to the POS cart by id', function () {
+it('adds a product to the POS cart by code while retaining its internal id', function () {
     [$product, $user] = createVisiblePosProduct($this, [
-        'name'  => 'ID orqali savatga tushadigan tovar',
-        'price' => 125000,
+        'name'        => 'ID orqali savatga tushadigan tovar',
+        'price'       => 125000,
+        'import_code' => 702,
     ]);
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
-        ->assertSet('searchById', '')
+        ->call('addByProductCode', (string) $product->import_code)
+        ->assertSet('searchByCode', '')
         ->assertSee('ID orqali savatga tushadigan tovar');
 
     expect(session('pos_carts.1.' . $product->id))
@@ -106,6 +110,94 @@ it('adds a product to the POS cart by id', function () {
         ]);
 });
 
+it('does not confuse a product code with another products database id', function () {
+    [$product, $user] = createVisiblePosProduct($this, ['import_code' => 701, 'name' => 'Correct code product']);
+    $other            = Product::factory()->create([
+        'id'          => 701,
+        'store_id'    => $product->store_id,
+        'import_code' => 702,
+        'name'        => 'Wrong database id product',
+    ]);
+
+    Livewire::actingAs($user)->test(Pos::class)
+        ->set('searchByCode', '701')
+        ->assertSee('Correct code product')
+        ->assertDontSee('Wrong database id product')
+        ->call('addByProductCode', '701');
+
+    expect(session('pos_carts.1.' . $product->id . '.id'))->toBe($product->id)
+        ->and(session('pos_carts.1.' . $other->id))->toBeNull();
+});
+
+it('never falls back to a database id when a code is missing', function () {
+    [$product, $user] = createVisiblePosProduct($this, ['import_code' => 701]);
+
+    Livewire::actingAs($user)->test(Pos::class)
+        ->set('searchByCode', (string) $product->id)
+        ->assertSet('products', fn ($products): bool => $products->isEmpty())
+        ->call('addByProductCode', (string) $product->id)
+        ->assertNotified('Mahsulot topilmadi');
+
+    expect(session('pos_carts.1.' . $product->id))->toBeNull();
+});
+
+it('searches return and exchange products by code and labels them with the code', function (string $field, string $options) {
+    [$product, $user] = createVisiblePosProduct($this, ['import_code' => 701]);
+
+    Livewire::actingAs($user)->test(Pos::class)
+        ->set($field, '701')
+        ->assertSet($options, fn (array $results): bool => count($results) === 1
+            && isset($results[$product->id]) && str_contains($results[$product->id], 'Kod: 701'));
+})->with([
+    ['returnProductSearch', 'returnProductOptions'],
+    ['exchangeInProductSearch', 'exchangeInProductOptions'],
+    ['exchangeOutProductSearch', 'exchangeOutProductOptions'],
+]);
+
+it('limits code searches and cart additions to the current store and active products', function (bool $deleted) {
+    [$product, $user] = createVisiblePosProduct($this, ['import_code' => 701]);
+
+    if ($deleted) {
+        $product->delete();
+    } else {
+        $otherStore = Store::query()->create(['name' => 'Other store', 'address' => 'Tashkent', 'phone' => '123']);
+        $user->update(['current_store_id' => $otherStore->id]);
+    }
+
+    Livewire::actingAs($user)->test(Pos::class)
+        ->set('searchByCode', '701')
+        ->assertSet('products', fn ($products): bool => $products->isEmpty())
+        ->call('addByProductCode', '701')
+        ->assertNotified('Mahsulot topilmadi');
+
+    expect(session('pos_carts.1.' . $product->id))->toBeNull();
+})->with([false, true]);
+
+it('handles invalid or oversized code input without adding products', function (string $input) {
+    [$product, $user] = createVisiblePosProduct($this, ['import_code' => 701]);
+
+    Livewire::actingAs($user)->test(Pos::class)
+        ->set('searchByCode', $input)
+        ->assertSet('products', fn ($products): bool => $products->isEmpty())
+        ->call('addByProductCode', $input);
+
+    expect(session('pos_carts.1.' . $product->id))->toBeNull();
+})->with(['', '0', '-1', '1.5', 'abc', '9999999999999999999999999999']);
+
+it('does not search across stores when the user has no current store', function () {
+    [$product, $user] = createVisiblePosProduct($this, ['import_code' => 701]);
+    $user->update(['current_store_id' => null]);
+
+    Livewire::actingAs($user)->test(Pos::class)
+        ->set('searchByCode', '701')
+        ->assertSet('products', fn ($products): bool => $products->isEmpty())
+        ->call('addByProductCode', '701')
+        ->set('returnProductSearch', '701')
+        ->assertSet('returnProductOptions', []);
+
+    expect(session('pos_carts.1.' . $product->id))->toBeNull();
+});
+
 it('applies and persists a customer discount during checkout', function () {
     [$product, $user] = createVisiblePosProduct($this, [
         'name'  => 'Chegirmali tovar',
@@ -115,7 +207,7 @@ it('applies and persists a customer discount during checkout', function () {
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
+        ->call('addByProductCode', (string) $product->import_code)
         ->call('selectClient', $client->id)
         ->set('customerDiscountType', 'percent')
         ->set('customerDiscountValue', 10)
@@ -151,7 +243,7 @@ it('allows a fully discounted customer sale with a zero final total', function (
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
+        ->call('addByProductCode', (string) $product->import_code)
         ->call('selectClient', $client->id)
         ->set('customerDiscountType', 'percent')
         ->set('customerDiscountValue', 100)
@@ -176,7 +268,7 @@ it('clears a customer discount when another customer is selected', function () {
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
+        ->call('addByProductCode', (string) $product->import_code)
         ->call('selectClient', $firstClient->id)
         ->set('customerDiscountType', 'fixed')
         ->set('customerDiscountValue', 25000)
@@ -203,7 +295,7 @@ it('adds a debt sale to the existing debtor without creating a duplicate', funct
 
     Livewire::actingAs($user)
         ->test(Pos::class)
-        ->call('addByProductId', (string) $product->id)
+        ->call('addByProductCode', (string) $product->import_code)
         ->call('selectClient', $client->id)
         ->call('selectPaymentType', 'debt')
         ->call('checkout');

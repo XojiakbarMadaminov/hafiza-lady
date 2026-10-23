@@ -6,9 +6,11 @@ use Spatie\Image\Enums\Fit;
 use Spatie\MediaLibrary\HasMedia;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Validator;
 use App\Models\Traits\HasCurrentStoreScope;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -34,6 +36,67 @@ class Product extends Model implements HasMedia
         'type'        => 'string',
         'import_code' => 'integer',
     ];
+
+    public static function parseCode(string $value): ?int
+    {
+        $value = trim($value);
+
+        if ($value === '' || !ctype_digit($value)) {
+            return null;
+        }
+
+        $code = filter_var(ltrim($value, '0'), FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1, 'max_range' => PHP_INT_MAX - 1000],
+        ]);
+
+        return $code === false ? null : $code;
+    }
+
+    public function save(array $options = []): bool
+    {
+        if ($this->exists) {
+            if ($this->isDirty('import_code')) {
+                throw ValidationException::withMessages(['import_code' => 'Tovar kodini o‘zgartirish mumkin emas.']);
+            }
+
+            return parent::save($options);
+        }
+
+        if (!$this->store_id) {
+            return parent::save($options);
+        }
+
+        return $this->getConnection()->transaction(function () use ($options): bool {
+            $store    = Store::on($this->getConnectionName())->withTrashed()->lockForUpdate()->findOrFail($this->store_id);
+            $products = static::on($this->getConnectionName())->withoutGlobalScope('current_store')->withTrashed()
+                ->where('store_id', $this->store_id);
+            $lastCode = max((int) $store->last_product_code, (int) (clone $products)->max('import_code'));
+
+            if ($this->import_code === null) {
+                if ($lastCode >= PHP_INT_MAX - 1000) {
+                    throw ValidationException::withMessages(['import_code' => 'Tovar kodlari chegarasiga yetildi.']);
+                }
+
+                $this->import_code = $lastCode + 1;
+            }
+
+            Validator::make(['import_code' => $this->getAttributes()['import_code']], [
+                'import_code' => ['required', 'integer', 'min:1', 'max:' . (PHP_INT_MAX - 1000)],
+            ])->validate();
+
+            if ((clone $products)->where('import_code', $this->import_code)->exists()) {
+                throw ValidationException::withMessages(['import_code' => 'Bu tovar kodi do‘konda band.']);
+            }
+
+            $saved = parent::save($options);
+
+            if ($saved) {
+                $store->forceFill(['last_product_code' => max($lastCode, $this->import_code)])->save();
+            }
+
+            return $saved;
+        });
+    }
 
     public function sizes()
     {
@@ -90,6 +153,10 @@ class Product extends Model implements HasMedia
     public function getDisplayLabelAttribute(): string
     {
         $parts = [];
+
+        if ($this->import_code !== null) {
+            $parts[] = 'Kod: ' . $this->import_code;
+        }
 
         if (filled($this->barcode)) {
             $parts[] = $this->barcode;

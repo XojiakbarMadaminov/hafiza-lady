@@ -16,6 +16,7 @@ class Store extends Model
     protected function casts(): array
     {
         return [
+            'last_product_code'  => 'integer',
             'always_with_client' => 'boolean',
             'send_sms'           => 'boolean',
         ];

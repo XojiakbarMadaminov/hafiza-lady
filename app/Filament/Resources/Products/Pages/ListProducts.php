@@ -26,7 +26,7 @@ class ListProducts extends ListRecords
                 ->label('Excel namuna yuklash')
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
-                ->tooltip('Namuna keyingi bo‘sh import kodidan boshlanadi. Eski tovarni yangilash uchun avvalgi kodini yozing.')
+                ->tooltip('Namuna keyingi bo‘sh tovar kodidan boshlanadi. Eski tovarni yangilash uchun avvalgi kodini yozing.')
                 ->authorize(fn (): bool => auth()->user()?->hasRole('super_admin') ?? false)
                 ->action(function (): BinaryFileResponse {
                     $path = tempnam(sys_get_temp_dir(), 'products-example-');
@@ -53,7 +53,7 @@ class ListProducts extends ListRecords
                         ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])
                         ->maxSize(10240)
                         ->storeFiles(false)
-                        ->helperText('id — do‘kon ichidagi doimiy import kodi. Yangi tovar uchun yangi kod, yangilash uchun avvalgi kodni yozing. Import kodi yo‘q eski tovarlar avtomatik bog‘lanmaydi: eski faylni qayta yuklashdan oldin ularni bog‘lash kerak, aks holda nusxa yaratiladi. Faqat birinchi varaq o‘qiladi. Nomi yoki narxi bo‘sh qatorlar o‘tkaziladi. Bo‘sh soni 0 deb olinadi.')
+                        ->helperText('tovar_kodi — ro‘yxat, yorliq va sotuvda ishlatiladigan doimiy tovar kodi. Yangi tovar uchun namunadagi bo‘sh koddan, yangilash uchun ro‘yxatdagi mavjud koddan foydalaning. Eski id sarlavhali fayllar ham tovar kodi sifatida o‘qiladi, baza IDsi sifatida emas. Namuna kodlarni band qilmaydi: to‘ldirish paytida boshqa tovar kiritilsa, yuklashdan oldin kodlarni tekshiring. Faqat birinchi varaq o‘qiladi. Nomi yoki narxi bo‘sh qatorlar o‘tkaziladi. Bo‘sh soni 0 deb olinadi.')
                         ->required(),
                 ])
                 ->action(function (array $data, Schema $schema): void {

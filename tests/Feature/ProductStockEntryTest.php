@@ -14,7 +14,9 @@ use Spatie\Permission\PermissionRegistrar;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use App\Filament\Resources\Products\Pages\EditProduct;
 use App\Filament\Resources\Products\Pages\ListProducts;
+use App\Filament\Resources\Products\Pages\CreateProduct;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 uses(RefreshDatabase::class);
@@ -63,6 +65,20 @@ it('adds received package quantity without changing product details', function (
 
     $this->service->receive($this->product, ['stock_id' => $this->stock->id, 'quantity' => 3]);
     expect($this->inventory->refresh()->quantity)->toBe(20);
+});
+
+it('does not expose the product code on the create form', function () {
+    $this->user->givePermissionTo(Permission::findOrCreate('Create:Product', 'web'));
+
+    Livewire::test(CreateProduct::class)
+        ->assertSuccessful()
+        ->assertFormFieldDoesNotExist('import_code');
+});
+
+it('does not expose the product code on the edit form', function () {
+    Livewire::test(EditProduct::class, ['record' => $this->product->getRouteKey()])
+        ->assertSuccessful()
+        ->assertFormFieldDoesNotExist('import_code');
 });
 
 it('shows disabled identity fields and places Kirim before Edit', function () {

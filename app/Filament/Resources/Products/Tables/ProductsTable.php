@@ -41,7 +41,7 @@ class ProductsTable
             ->defaultSort('created_at', 'desc')
             ->columns(array_merge(
                 [
-                    TextColumn::make('id')->label('ID')->searchable(isIndividual: true)->sortable(),
+                    TextColumn::make('import_code')->label('Tovar kodi')->searchable(isIndividual: true)->sortable(),
                     //                    ImageColumn::make('first_image')
                     //                        ->label('Rasm')
                     //                        ->getStateUsing(fn (Product $record) => $record->getPrimaryImageUrl())

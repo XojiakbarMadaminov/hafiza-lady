@@ -63,11 +63,11 @@ class Pos extends Page
             || $user->hasAnyRole(['super_admin', 'admin']);
     }
 
-    public string $search     = '';
-    public string $searchById = '';
-    public int $activeCartId  = 1; // Joriy faol cart ID
-    public bool $showReceipt  = false; // Chek ko'rsatish uchun
-    public array $receiptData = []; // Chek ma'lumotlari
+    public string $search       = '';
+    public string $searchByCode = '';
+    public int $activeCartId    = 1; // Joriy faol cart ID
+    public bool $showReceipt    = false; // Chek ko'rsatish uchun
+    public array $receiptData   = []; // Chek ma'lumotlari
 
     /** @var EloquentCollection<int, Product> */
     public EloquentCollection $products;
@@ -199,7 +199,7 @@ class Pos extends Page
         $this->loadActiveCartMeta();
 
         $this->refreshCart();
-        $this->reset('search', 'searchById');
+        $this->reset('search', 'searchByCode');
         $this->products = new EloquentCollection;
     }
 
@@ -287,7 +287,7 @@ class Pos extends Page
     public function updatedSearch(): void
     {
         $this->expandedVariantProductId = null;
-        $this->searchById               = '';
+        $this->searchByCode             = '';
 
         if (empty(trim($this->search))) {
             $this->products = new EloquentCollection;
@@ -305,21 +305,21 @@ class Pos extends Page
             ->get();
     }
 
-    public function updatedSearchById(): void
+    public function updatedSearchByCode(): void
     {
         $this->expandedVariantProductId = null;
         $this->search                   = '';
 
-        $term = trim($this->searchById);
+        $code = Product::parseCode($this->searchByCode);
 
-        if ($term === '' || !ctype_digit($term)) {
+        if ($code === null || !auth()->user()?->current_store_id) {
             $this->products = new EloquentCollection;
 
             return;
         }
 
         $this->products = Product::query()
-            ->whereKey((int) $term)
+            ->where('import_code', $code)
             ->limit(1)
             ->get();
     }
@@ -1524,16 +1524,16 @@ class Pos extends Page
         }
     }
 
-    public function addByProductId(string $value): void
+    public function addByProductCode(string $value): void
     {
-        $value = trim($value);
+        $code = Product::parseCode($value);
 
-        if ($value === '' || !ctype_digit($value)) {
+        if ($code === null || !auth()->user()?->current_store_id) {
             return;
         }
 
         $product = Product::query()
-            ->whereKey((int) $value)
+            ->where('import_code', $code)
             ->first();
 
         if ($product) {
@@ -1544,7 +1544,7 @@ class Pos extends Page
             }
 
             app(CartService::class)->add($product, 1, $this->activeCartId);
-            $this->reset('searchById');
+            $this->reset('searchByCode');
             $this->products = new EloquentCollection;
             $this->refreshCart();
             $this->refreshActiveCarts();
@@ -2461,18 +2461,22 @@ class Pos extends Page
     {
         $term = trim((string) ($term ?? ''));
 
-        if ($term === '') {
+        if ($term === '' || !auth()->user()?->current_store_id) {
             return [];
         }
 
         return Product::query()
             ->where(function ($q) use ($term) {
-                $q->where('name', 'ilike', "%{$term}%")
-                    ->orWhere('barcode', 'ilike', "%{$term}%");
+                $q->whereLike('name', "%{$term}%")
+                    ->orWhereLike('barcode', "%{$term}%");
+
+                if (($code = Product::parseCode($term)) !== null) {
+                    $q->orWhere('import_code', $code);
+                }
             })
             ->orderBy('name')
             ->limit(25)
-            ->get(['id', 'name', 'barcode'])
+            ->get(['id', 'import_code', 'name', 'barcode'])
             ->mapWithKeys(function (Product $product) {
                 return [$product->id => $this->formatProductOptionLabel($product)];
             })
@@ -2492,7 +2496,10 @@ class Pos extends Page
 
     protected function formatProductOptionLabel(Product $product): string
     {
-        $label   = $product->name ?? 'Noma’lum';
+        $label = $product->name ?? 'Noma’lum';
+        if ($product->import_code !== null) {
+            $label = 'Kod: ' . $product->import_code . ' — ' . $label;
+        }
         $barcode = trim((string) ($product->barcode ?? ''));
 
         if ($barcode !== '') {

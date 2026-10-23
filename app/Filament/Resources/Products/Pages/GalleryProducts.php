@@ -71,6 +71,10 @@ class GalleryProducts extends Page
                     $subQuery
                         ->whereRaw('LOWER(name) LIKE ?', ['%' . $normalized . '%'])
                         ->orWhereRaw('LOWER(barcode) LIKE ?', ['%' . $normalized . '%']);
+
+                    if (($code = Product::parseCode($normalized)) !== null) {
+                        $subQuery->orWhere('import_code', $code);
+                    }
                 });
             })
             ->when(filled($this->categoryId), function (Builder $query) {

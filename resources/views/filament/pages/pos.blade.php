@@ -506,11 +506,11 @@
                         <x-heroicon-o-hashtag class="w-5 h-5 text-gray-400 dark:text-gray-500"/>
                     </x-slot>
                     <x-filament::input
-                        name="searchById"
+                        name="searchByCode"
                         inputmode="numeric"
-                        x-on:keydown.enter="$wire.addByProductId($event.target.value); $event.target.value=''"
-                        wire:model.live="searchById"
-                        placeholder="Tovar ID si orqali qidiring..."
+                        x-on:keydown.enter="$wire.addByProductCode($event.target.value); $event.target.value=''"
+                        wire:model.live="searchByCode"
+                        placeholder="Tovar kodi orqali qidiring..."
                     />
                 </x-filament::input.wrapper>
             </div>
@@ -520,7 +520,7 @@
                 <table class="w-full mt-4 text-sm">
                     <thead class="bg-gray-100 dark:bg-gray-800">
                     <tr>
-                        <th class="px-2 py-1 text-left">ID</th>
+                        <th class="px-2 py-1 text-left">Tovar kodi</th>
                         <th class="px-2 py-1 text-left">Nomi</th>
                         <th class="px-2 py-1 text-right">Narxi</th>
                         <th class="px-2 py-1"></th>
@@ -531,7 +531,7 @@
                         <tr wire:key="item-{{ $p->id }}"
                              class="bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-200">
                             <td class="px-2 py-1 font-medium text-gray-700 dark:text-gray-300">
-                                #{{ $p->id }}
+                                {{ $p->import_code }}
                             </td>
                             <td class="px-2 py-1">{{ $p->name }}</td>
                             <td class="px-2 py-1 text-right">{{ number_format($p->price, 2, '.', ' ') }}</td>
