@@ -10,6 +10,7 @@ use App\Models\Product;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Reader\XLSX\Reader;
 use OpenSpout\Writer\XLSX\Writer;
+use OpenSpout\Common\Entity\Style\Style;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use OpenSpout\Common\Exception\OpenSpoutException;
@@ -42,16 +43,20 @@ class ProductExcelImportService
     {
         abort_unless($user->hasRole('super_admin'), 403);
 
-        $firstCode = $this->nextImportCode($user);
-        $rowCount  = min(1000, PHP_INT_MAX - 1000 - $firstCode + 1);
-        $writer    = new Writer;
+        $firstCode  = $this->nextImportCode($user);
+        $rowCount   = min(1000, PHP_INT_MAX - 1000 - $firstCode + 1);
+        $priceStyle = (new Style)->setFormat('0');
+        $writer     = new Writer;
         $writer->openToFile($path);
 
         try {
             $writer->addRow(Row::fromValues(self::HEADERS));
 
             for ($offset = 0; $offset < $rowCount; $offset++) {
-                $writer->addRow(Row::fromValues([(string) ($firstCode + $offset), '', '', '', '']));
+                $writer->addRow(Row::fromValuesWithStyles(
+                    [(string) ($firstCode + $offset), '', '', '', ''],
+                    columnStyles: [2 => $priceStyle, 3 => $priceStyle],
+                ));
             }
         } finally {
             $writer->close();
