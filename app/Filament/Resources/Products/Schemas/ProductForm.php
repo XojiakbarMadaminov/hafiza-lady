@@ -36,7 +36,8 @@ class ProductForm
                         TextInput::make('barcode')
                             ->label('Bar kod')
                             ->unique('products', 'barcode', ignoreRecord: true)
-                            ->numeric()
+                            ->inputMode('numeric')
+                            ->rule('numeric')
                             ->required()
                             ->autofocus()
                             ->suffixAction(

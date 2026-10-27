@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductStock;
 use Filament\Facades\Filament;
 use Filament\Actions\Testing\TestAction;
+use Filament\Forms\Components\TextInput;
 use Spatie\Permission\Models\Permission;
 use App\Services\ProductStockEntryService;
 use Spatie\Permission\PermissionRegistrar;
@@ -79,6 +80,35 @@ it('does not expose the product code on the edit form', function () {
     Livewire::test(EditProduct::class, ['record' => $this->product->getRouteKey()])
         ->assertSuccessful()
         ->assertFormFieldDoesNotExist('import_code');
+});
+
+it('preserves leading zeros when displaying and saving product barcodes', function (string $barcode) {
+    $this->product->update(['barcode' => $barcode]);
+
+    Livewire::test(EditProduct::class, ['record' => $this->product->getRouteKey()])
+        ->assertSchemaStateSet(['barcode' => $barcode])
+        ->assertFormFieldExists('barcode', fn (TextInput $field): bool => $field->getType() === 'text')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($this->product->fresh()->barcode)->toBe($barcode);
+})->with(['0622670854334', '0419335059476', '0012345678905']);
+
+it('preserves leading zeros when creating a product', function () {
+    $this->user->givePermissionTo(Permission::findOrCreate('Create:Product', 'web'));
+
+    Livewire::test(CreateProduct::class)
+        ->fillForm([
+            'name'          => 'Leading zero product',
+            'barcode'       => '0622670854334',
+            'type'          => Product::TYPE_PACKAGE,
+            'initial_price' => 68,
+            'price'         => 89,
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(Product::query()->where('name', 'Leading zero product')->sole()->barcode)->toBe('0622670854334');
 });
 
 it('shows disabled identity fields and places Kirim before Edit', function () {
