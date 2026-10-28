@@ -93,7 +93,18 @@ class ProductExcelImportService
                         $values = $row->toArray();
 
                         if (!$hasHeader) {
-                            if ($values !== self::HEADERS && $values !== self::LEGACY_HEADERS) {
+                            $headers = array_map(
+                                fn (mixed $value): mixed => is_string($value)
+                                    ? trim(str_replace(["\xEF\xBB\xBF", "\xC2\xA0"], ['', ' '], $value))
+                                    : $value,
+                                $values,
+                            );
+
+                            while ($headers !== [] && end($headers) === '') {
+                                array_pop($headers);
+                            }
+
+                            if ($headers !== self::HEADERS && $headers !== self::LEGACY_HEADERS) {
                                 throw ValidationException::withMessages(['file' => 'Ustunlar namunadagidek bo‘lishi kerak: ' . implode(', ', self::HEADERS)]);
                             }
 

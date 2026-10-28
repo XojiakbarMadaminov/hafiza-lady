@@ -280,10 +280,40 @@ it('rejects invalid numbers and rolls back the entire import', function (array $
     'fractional quantity' => [[1000, 'Product', 10, 20, 1.5]],
 ]);
 
-it('rejects missing or incorrect column headers', function () {
-    $path = ($this->makeExcel)([], ['id', 'name']);
+it('accepts header whitespace and trailing empty columns', function (array $headers) {
+    $path = ($this->makeExcel)([[21, 1901, 79000, 99000, 20]], $headers);
+
+    expect($this->service->import($path, $this->user, $this->stock->id))
+        ->toBe(['created' => 1, 'updated' => 0, 'skipped' => 0])
+        ->and(Product::query()->where('import_code', 21)->sole()->name)->toBe('1901');
+})->with([
+    'extra empty columns'               => [['tovar_kodi', 'nomi', 'kelgan_narx', 'sotuv_narxi', 'soni', '', '', '']],
+    'surrounding whitespace'            => [[' tovar_kodi ', "nomi\t", ' kelgan_narx', 'sotuv_narxi ', "soni\n"]],
+    'invisible characters'              => [["\xEF\xBB\xBFtovar_kodi", "\xC2\xA0nomi\xC2\xA0", 'kelgan_narx', 'sotuv_narxi', 'soni', "\xC2\xA0"]],
+    'legacy headers with empty columns' => [['id', 'nomi', 'kelgan_narx', 'sotuv_narxi', 'soni', '']],
+]);
+
+it('rejects missing or incorrect column headers', function (array $headers) {
+    $path = ($this->makeExcel)([], $headers);
 
     expect(fn () => $this->service->import($path, $this->user, $this->stock->id))->toThrow(ValidationException::class);
+})->with([
+    'missing columns'              => [['id', 'name']],
+    'unexpected column'            => [['tovar_kodi', 'nomi', 'kelgan_narx', 'sotuv_narxi', 'soni', 'extra']],
+    'wrong column order'           => [['tovar_kodi', 'nomi', 'sotuv_narxi', 'kelgan_narx', 'soni']],
+    'empty column between headers' => [['tovar_kodi', 'nomi', '', 'kelgan_narx', 'sotuv_narxi', 'soni']],
+]);
+
+it('accepts worksheets whose used range extends beyond the header columns', function () {
+    $path    = ($this->makeExcel)([[21, 'Product', 79000, 99000, 20]]);
+    $archive = new ZipArchive;
+    $archive->open($path);
+    $sheetXml = $archive->getFromName('xl/worksheets/sheet1.xml');
+    $archive->addFromString('xl/worksheets/sheet1.xml', str_replace('<sheetData>', '<dimension ref="A1:I2"/><sheetData>', $sheetXml));
+    $archive->close();
+
+    expect($this->service->import($path, $this->user, $this->stock->id))
+        ->toBe(['created' => 1, 'updated' => 0, 'skipped' => 0]);
 });
 
 it('rejects duplicate codes without partially changing existing products or the sequence', function () {
