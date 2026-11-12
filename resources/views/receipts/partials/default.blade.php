@@ -144,7 +144,8 @@
     <span>{{ number_format((float) ($totals['amount'] ?? 0), 0, '.', ' ') }} so'm</span>
 </div>
 <div class="center bold" style="margin-top:10px; font-size:12px;">
-    Eslatma: Sotilgan tovarni 3 kun ichida qaytarish yoki almashtirish mumkin
+    Eslatma: Tovarni 3 kun ichida almashtirish mumkin.<br>
+    Sotilgan tovarlar qaytarib olinmaydi.
 </div>
 <div class="center bold" style="margin-top:18px; font-size:12px;">
     Xaridingiz uchun rahmat!<br>
